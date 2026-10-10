@@ -1,0 +1,78 @@
+package academic_analytics_backend.config;
+
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.util.Map;
+
+@Component
+public class MlServiceClient {
+    private final RestClient client;
+
+    public MlServiceClient(@Value("${app.ml.base-url:}") String baseUrl,
+                           @Value("${app.ml.api-key:}") String apiKey) {
+        this.client = baseUrl == null || baseUrl.isBlank() ? null : RestClient.builder()
+                .baseUrl(baseUrl.replaceAll("/+$", ""))
+                .defaultHeader("X-API-Key", apiKey == null ? "" : apiKey)
+                .build();
+    }
+
+    public boolean isConfigured() { return client != null; }
+
+    public Map<String, Object> train(MultipartFile file) {
+        requireConfigured();
+        try {
+            String filename = file.getOriginalFilename() == null ? "dataset.csv" : file.getOriginalFilename();
+            HttpHeaders partHeaders = new HttpHeaders();
+            partHeaders.setContentDispositionFormData("file", filename);
+            partHeaders.setContentType(MediaType.TEXT_PLAIN);
+            ByteArrayResource resource = new ByteArrayResource(file.getBytes()) {
+                @Override public String getFilename() { return filename; }
+            };
+            HttpEntity<ByteArrayResource> part = new HttpEntity<>(resource, partHeaders);
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            body.add("file", part);
+            Map<String, Object> result = client.post().uri("/train")
+                    .contentType(MediaType.MULTIPART_FORM_DATA).body(body)
+                    .retrieve().body(new ParameterizedTypeReference<>() {});
+            return result == null ? Map.of("modelTrained", false) : result;
+        } catch (IOException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not read the uploaded CSV.");
+        } catch (RestClientException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML training request failed. Check the CSV requirements and service logs.");
+        }
+    }
+
+    public Map<String, Object> predict(double attendancePercent, double averageMarksPercent, String modelArtifact) {
+        requireConfigured();
+        try {
+            Map<String, Object> result = client.post().uri("/predict").contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("samples", new Object[]{Map.of(
+                            "attendance_percent", attendancePercent,
+                            "average_marks_percent", averageMarksPercent)},
+                            "modelArtifact", modelArtifact))
+                    .retrieve().body(new ParameterizedTypeReference<>() {});
+            if (result == null) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML service returned no prediction.");
+            return result;
+        } catch (RestClientException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "No trained model is available, or the ML service is unavailable.");
+        }
+    }
+
+    private void requireConfigured() {
+        if (client == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "ML_SERVICE_URL is not configured.");
+    }
+}

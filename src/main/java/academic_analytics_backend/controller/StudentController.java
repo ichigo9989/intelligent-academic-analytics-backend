@@ -5,11 +5,14 @@ import academic_analytics_backend.service.StudentService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @CrossOrigin(origins = "${FRONTEND_ORIGIN:http://localhost:5173}")
+@PreAuthorize("hasAnyRole('ADMIN', 'FACULTY')")
 @RestController
 @RequestMapping("/api/students")
 public class StudentController {
@@ -23,7 +26,7 @@ public class StudentController {
     // Create a student
     @PostMapping
     public ResponseEntity<Student> createStudent(
-            @RequestBody Student student) {
+            @Valid @RequestBody Student student) {
 
         Student savedStudent =
                 studentService.createStudent(student);
@@ -48,7 +51,7 @@ public class StudentController {
     @PutMapping("/{id}")
     public Student updateStudent(
             @PathVariable Long id,
-            @RequestBody Student student) {
+            @Valid @RequestBody Student student) {
 
         return studentService.updateStudent(id, student);
     }

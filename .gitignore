@@ -36,3 +36,7 @@ src/main/resources/application-local.properties
 
 .env
 *.env
+ml-service/.venv/
+ml-service/__pycache__/
+ml-service/artifacts/
+*.joblib

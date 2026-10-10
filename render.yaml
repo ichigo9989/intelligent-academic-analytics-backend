@@ -21,3 +21,23 @@ services:
         sync: false
       - key: FRONTEND_ORIGIN
         sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: ML_API_KEY
+        sync: false
+  - type: web
+    name: academic-analytics-ml
+    runtime: docker
+    plan: free
+    dockerfilePath: ./ml-service/Dockerfile
+    dockerContext: ./ml-service
+    healthCheckPath: /health
+    envVars:
+      - key: ML_API_KEY
+        sync: false
+      - key: MODEL_PATH
+        value: /app/artifacts/eduinsight-model.joblib

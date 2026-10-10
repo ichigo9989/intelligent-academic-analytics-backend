@@ -6,6 +6,11 @@ import jakarta.persistence.Id;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Column;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 @Entity
 @Table(name = "students")
@@ -16,16 +21,22 @@ public class Student {
     private Long id;
 
     @Column(nullable = false, unique = true)
+    @NotBlank @Size(max = 50)
     private String rollNumber;
 
     @Column(nullable = false)
+    @NotBlank @Size(max = 150)
     private String fullName;
 
     @Column(unique = true)
+    @Email @Size(max = 254)
     private String email;
 
+    @Size(max = 100)
     private String department;
+    @Min(1) @Max(8)
     private Integer academicYear;
+    @Size(max = 10)
     private String section;
 
     // Required by JPA
