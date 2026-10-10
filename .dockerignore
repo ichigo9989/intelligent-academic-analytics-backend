@@ -1,0 +1,6 @@
+
+.git
+target/
+.env
+*.env
+src/main/resources/application-local.properties
