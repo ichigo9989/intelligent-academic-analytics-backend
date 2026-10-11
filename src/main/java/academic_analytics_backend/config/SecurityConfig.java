@@ -34,7 +34,17 @@ public class SecurityConfig {
                 .exceptionHandling(errors -> errors.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/test").permitAll()
+                        .requestMatchers(request -> {
+                            String path = request.getRequestURI();
+                            String contextPath = request.getContextPath();
+                            if (!contextPath.isEmpty() && path.startsWith(contextPath)) {
+                                path = path.substring(contextPath.length());
+                            }
+                            String method = request.getMethod();
+                            return ("POST".equals(method)
+                                            && ("/api/auth/login".equals(path) || "/api/auth/register".equals(path)))
+                                    || ("GET".equals(method) && "/api/test".equals(path));
+                        }).permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
