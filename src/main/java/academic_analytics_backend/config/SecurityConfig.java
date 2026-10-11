@@ -41,9 +41,12 @@ public class SecurityConfig {
                                 path = path.substring(contextPath.length());
                             }
                             String method = request.getMethod();
-                            return ("POST".equals(method)
-                                            && ("/api/auth/login".equals(path) || "/api/auth/register".equals(path)))
+                            boolean allowed = ("POST".equals(method)
+                                    && ("/api/auth/login".equals(path) || "/api/auth/register".equals(path)))
                                     || ("GET".equals(method) && "/api/test".equals(path));
+                            System.out.printf("Public route matcher: method=%s uri=%s context=%s servlet=%s allowed=%s%n",
+                                    method, request.getRequestURI(), contextPath, request.getServletPath(), allowed);
+                            return allowed;
                         }).permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
