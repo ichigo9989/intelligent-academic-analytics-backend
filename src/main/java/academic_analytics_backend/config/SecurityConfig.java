@@ -1,5 +1,6 @@
 package academic_analytics_backend.config;
 
+import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,6 +34,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(errors -> errors.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(requests -> requests
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(request -> {
                             String path = request.getRequestURI();
@@ -44,8 +46,6 @@ public class SecurityConfig {
                             boolean allowed = ("POST".equals(method)
                                     && ("/api/auth/login".equals(path) || "/api/auth/register".equals(path)))
                                     || ("GET".equals(method) && "/api/test".equals(path));
-                            System.out.printf("Public route matcher: method=%s uri=%s context=%s servlet=%s allowed=%s%n",
-                                    method, request.getRequestURI(), contextPath, request.getServletPath(), allowed);
                             return allowed;
                         }).permitAll()
                         .anyRequest().authenticated())
