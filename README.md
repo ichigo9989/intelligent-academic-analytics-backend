@@ -4,6 +4,13 @@ EduInsight is a React, Spring Boot, MySQL, and Python application for student pr
 
 The backend Git repository contains the Spring Boot API and the `ml-service` used for training and predictions. The frontend is maintained in the separate `intelligent-academic-analytics-frontend` repository.
 
+## Live project
+
+- **Application:** [https://ichigoo789.netlify.app](https://ichigoo789.netlify.app)
+- **Spring Boot API:** [https://academic-analytics-backend.onrender.com](https://academic-analytics-backend.onrender.com)
+- **ML service:** [https://academic-analytics-ml.onrender.com](https://academic-analytics-ml.onrender.com)
+- **Frontend repository:** [https://github.com/ichigo9989/intelligent-academic-analytics-frontend](https://github.com/ichigo9989/intelligent-academic-analytics-frontend)
+
 ## Features
 
 - JWT sign-in for administrator, faculty, and student roles; passwords are BCrypt-hashed.
