@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import java.util.Optional;
+import java.util.List;
 
 public interface TrainedModelArtifactRepository extends JpaRepository<TrainedModelArtifact, String> {
     @Query("select m.id as id, m.algorithm as algorithm, m.modelVersion as modelVersion, m.cvMae as cvMae, "
@@ -13,8 +14,18 @@ public interface TrainedModelArtifactRepository extends JpaRepository<TrainedMod
             + "from TrainedModelArtifact m where m.id = :id")
     Optional<ModelMetadata> findMetadataById(@Param("id") String id);
 
+    @Query("select m.id as id, m.label as label, m.featureColumns as featureColumns, m.targetColumn as targetColumn, "
+            + "m.algorithm as algorithm, m.modelVersion as modelVersion, m.cvMae as cvMae, "
+            + "m.mae as mae, m.rmse as rmse, m.r2 as r2, "
+            + "m.datasetRows as datasetRows, m.trainRows as trainRows, m.testRows as testRows, m.trainedAt as trainedAt "
+            + "from TrainedModelArtifact m order by m.id")
+    List<ModelMetadata> findAllMetadata();
+
     interface ModelMetadata {
         String getId();
+        String getLabel();
+        String getFeatureColumns();
+        String getTargetColumn();
         String getAlgorithm();
         String getModelVersion();
         Double getCvMae();

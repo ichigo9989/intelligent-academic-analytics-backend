@@ -21,6 +21,9 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Base64;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Objects;
 
 @Service
 public class PredictionService {
@@ -56,39 +59,118 @@ public class PredictionService {
                 model.getModelVersion() == null ? "1.0.0" : model.getModelVersion(), metrics, model.getTrainedAt());
     }
 
-    public Map<String, Object> train(org.springframework.web.multipart.MultipartFile file) {
-        Map<String, Object> result = ml.train(file);
-        Object artifactValue = result.get("modelArtifact");
-        Object metricsValue = result.get("metrics");
-        if (!(artifactValue instanceof String artifactBase64) || !(metricsValue instanceof Map<?, ?> metrics)) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML service returned an incomplete training result.");
+    @Transactional(readOnly = true)
+    public Map<String, Object> catalog() {
+        List<Map<String, Object>> profiles = new ArrayList<>();
+        for (var model : modelRepository.findAllMetadata()) {
+            Map<String, Object> metrics = metrics(model);
+            List<String> features = model.getFeatureColumns() == null || model.getFeatureColumns().isBlank()
+                    ? (TrainedModelArtifact.ACTIVE_MODEL_ID.equals(model.getId())
+                        ? List.of("attendance_percent", "average_marks_percent") : List.of())
+                    : List.of(model.getFeatureColumns().split(","));
+            Map<String, Object> profile = new LinkedHashMap<>();
+            profile.put("modelKey", model.getId());
+            profile.put("label", Objects.requireNonNullElse(model.getLabel(),
+                    TrainedModelArtifact.ACTIVE_MODEL_ID.equals(model.getId())
+                            ? "Attendance and current marks → final score" : model.getId()));
+            profile.put("features", features);
+            profile.put("target", Objects.requireNonNullElse(model.getTargetColumn(),
+                    TrainedModelArtifact.ACTIVE_MODEL_ID.equals(model.getId()) ? "final_score" : ""));
+            profile.put("algorithm", model.getAlgorithm());
+            profile.put("modelVersion", Objects.requireNonNullElse(model.getModelVersion(), "1.0.0"));
+            profile.put("metrics", metrics);
+            profile.put("trainedAt", model.getTrainedAt());
+            profiles.add(profile);
         }
-        byte[] artifactBytes;
-        try {
-            artifactBytes = Base64.getDecoder().decode(artifactBase64);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML service returned an invalid model artifact.");
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("configured", ml.isConfigured());
+        response.put("modelTrained", !profiles.isEmpty());
+        response.put("models", profiles);
+        return response;
+    }
+
+    @Transactional
+    public Map<String, Object> train(List<org.springframework.web.multipart.MultipartFile> files) {
+        Map<String, Object> result = ml.train(files);
+        if (!(result.get("models") instanceof List<?> trainedProfiles) || trainedProfiles.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML service returned no trained model profiles.");
         }
-        if (artifactBytes.length == 0 || artifactBytes.length > 25 * 1024 * 1024) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Trained model artifact exceeds the storage limit.");
+        List<Map<String, Object>> publicProfiles = new ArrayList<>();
+        for (Object profileValue : trainedProfiles) {
+            if (!(profileValue instanceof Map<?, ?> profile)
+                    || !(profile.get("modelArtifact") instanceof String artifactBase64)
+                    || !(profile.get("metrics") instanceof Map<?, ?> metrics)
+                    || !(profile.get("features") instanceof List<?> features)) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML service returned an incomplete model profile.");
+            }
+            byte[] artifactBytes;
+            try {
+                artifactBytes = Base64.getDecoder().decode(artifactBase64);
+            } catch (IllegalArgumentException ex) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML service returned an invalid model artifact.");
+            }
+            if (artifactBytes.length == 0 || artifactBytes.length > 25 * 1024 * 1024) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Trained model artifact exceeds the storage limit.");
+            }
+            String modelKey = requiredString(profile, "modelKey");
+            TrainedModelArtifact model = new TrainedModelArtifact();
+            model.setId(modelKey);
+            model.setModelBytes(artifactBytes);
+            model.setLabel(requiredString(profile, "label"));
+            model.setFeatureColumns(features.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
+            model.setTargetColumn(requiredString(profile, "target"));
+            model.setAlgorithm(requiredString(profile, "algorithm"));
+            model.setModelVersion(String.valueOf(profile.get("modelVersion") == null ? "1.2.0" : profile.get("modelVersion")));
+            if (metrics.get("cvMae") instanceof Number cvMae) model.setCvMae(cvMae.doubleValue());
+            model.setMae(number(metrics, "mae"));
+            model.setRmse(number(metrics, "rmse"));
+            model.setR2(number(metrics, "r2"));
+            model.setDatasetRows(integer(metrics, "datasetRows"));
+            model.setTrainRows(integer(metrics, "trainRows"));
+            model.setTestRows(integer(metrics, "testRows"));
+            model.setTrainedAt(profile.get("trainedAt") == null ? "" : String.valueOf(profile.get("trainedAt")));
+            modelRepository.save(model);
+            Map<String, Object> safeProfile = new LinkedHashMap<>();
+            profile.forEach((key, value) -> {
+                if (key instanceof String name && !name.equals("modelArtifact")) safeProfile.put(name, value);
+            });
+            publicProfiles.add(safeProfile);
         }
-        TrainedModelArtifact model = new TrainedModelArtifact();
-        model.setId(TrainedModelArtifact.ACTIVE_MODEL_ID);
-        model.setModelBytes(artifactBytes);
-        model.setAlgorithm(String.valueOf(result.getOrDefault("algorithm", "RandomForestRegressor")));
-        model.setModelVersion(String.valueOf(result.getOrDefault("modelVersion", "1.0.0")));
-        if (metrics.get("cvMae") instanceof Number cvMae) model.setCvMae(cvMae.doubleValue());
-        model.setMae(number(metrics, "mae"));
-        model.setRmse(number(metrics, "rmse"));
-        model.setR2(number(metrics, "r2"));
-        model.setDatasetRows(integer(metrics, "datasetRows"));
-        model.setTrainRows(integer(metrics, "trainRows"));
-        model.setTestRows(integer(metrics, "testRows"));
-        model.setTrainedAt(String.valueOf(result.getOrDefault("trainedAt", "")));
-        modelRepository.save(model);
-        Map<String, Object> publicResult = new HashMap<>(result);
-        publicResult.remove("modelArtifact");
-        return publicResult;
+        return Map.of("modelTrained", true, "models", publicProfiles);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> estimate(String modelKey, Map<String, Double> features) {
+        TrainedModelArtifact model = modelRepository.findById(modelKey)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "That prediction model has not been trained."));
+        List<String> expected = model.getFeatureColumns() == null || model.getFeatureColumns().isBlank()
+                ? List.of() : List.of(model.getFeatureColumns().split(","));
+        if (expected.isEmpty() && TrainedModelArtifact.ACTIVE_MODEL_ID.equals(modelKey)) {
+            expected = List.of("attendance_percent", "average_marks_percent");
+        }
+        if (features == null || expected.isEmpty() || !features.keySet().equals(new java.util.HashSet<>(expected))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Provide exactly these prediction inputs: " + String.join(", ", expected) + ".");
+        }
+        if (features.values().stream().anyMatch(value -> value == null || !Double.isFinite(value) || value < 0)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Prediction inputs must be finite non-negative numbers.");
+        }
+        String encodedArtifact = Base64.getEncoder().encodeToString(model.getModelBytes());
+        Map<String, Object> result = ml.predict(modelKey, features, encodedArtifact);
+        if (!(result.get("predictions") instanceof List<?> predictions) || predictions.isEmpty()
+                || !(predictions.getFirst() instanceof Number predicted)) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML service returned an invalid prediction.");
+        }
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("modelKey", modelKey);
+        response.put("label", model.getLabel());
+        response.put("target", model.getTargetColumn());
+        response.put("predictedValue", predicted.doubleValue());
+        response.put("algorithm", model.getAlgorithm());
+        response.put("modelVersion", model.getModelVersion());
+        response.put("trainedAt", model.getTrainedAt());
+        response.put("metrics", metrics(model));
+        response.put("inputs", features);
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -138,5 +220,35 @@ public class PredictionService {
         Object value = metrics.get(key);
         if (value instanceof Number number) return number.intValue();
         throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML service omitted training split details.");
+    }
+
+    private static String requiredString(Map<?, ?> values, String key) {
+        Object value = values.get(key);
+        if (value instanceof String text && !text.isBlank()) return text;
+        throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML service omitted " + key + " in a model profile.");
+    }
+
+    private static Map<String, Object> metrics(TrainedModelArtifact model) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("mae", model.getMae());
+        values.put("rmse", model.getRmse());
+        values.put("r2", model.getR2());
+        if (model.getCvMae() != null) values.put("cvMae", model.getCvMae());
+        values.put("datasetRows", model.getDatasetRows());
+        values.put("trainRows", model.getTrainRows());
+        values.put("testRows", model.getTestRows());
+        return values;
+    }
+
+    private static Map<String, Object> metrics(TrainedModelArtifactRepository.ModelMetadata model) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("mae", model.getMae());
+        values.put("rmse", model.getRmse());
+        values.put("r2", model.getR2());
+        if (model.getCvMae() != null) values.put("cvMae", model.getCvMae());
+        values.put("datasetRows", model.getDatasetRows());
+        values.put("trainRows", model.getTrainRows());
+        values.put("testRows", model.getTestRows());
+        return values;
     }
 }

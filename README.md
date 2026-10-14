@@ -80,15 +80,17 @@ Check the backend health at `https://<backend-host>/api/test`. After deployment,
 
 ## ML dataset and behavior
 
-The administrator uploads a CSV in **AI Predictions**. Required numeric columns are:
+The administrator can upload one or more CSVs in **AI Predictions**. Each file trains an independent model profile; datasets with different columns or score scales are never combined. Supported numeric columns are:
 
 ```text
 attendance_percent,average_marks_percent,final_score
+study_hours,student_marks
+number_courses,time_study,Marks
 ```
 
-Values must be 0–100 and at least 30 complete rows are required. Use historical records where attendance and marks are measured before the `final_score` outcome. If a student appears in multiple terms, add a stable pseudonymous `student_group` column so the holdout split keeps each student in only one partition. Do not upload names, emails, or other direct identifiers. The model target and holdout metrics are shown with each prediction. If there is no valid trained model, the prediction endpoint returns unavailable instead of an invented score.
+The `attendance_percent`, `average_marks_percent`, and `final_score` values must be between 0 and 100. Other feature and target values must be non-negative, and targets must be at most 100. Each CSV needs at least 30 complete numeric rows; incomplete rows are dropped and reported. Use historical records where inputs were measured before the target outcome. If a student appears in multiple terms, add a stable pseudonymous `student_group` column so the holdout split keeps each student in one partition. Do not upload names, emails, or other direct identifiers. Predictions are accepted only within the feature ranges observed during training. Holdout metrics are shown for every profile. If there is no valid trained model, the prediction endpoint returns unavailable instead of an invented score.
 
-The CSV header template is [ml-service/dataset-template.csv](ml-service/dataset-template.csv); detailed pipeline notes are in [ml-service/README.md](ml-service/README.md).
+CSV header templates are available in the frontend app. Detailed pipeline notes are in [ml-service/README.md](ml-service/README.md).
 
 ## Main API routes
 
@@ -101,5 +103,8 @@ The CSV header template is [ml-service/dataset-template.csv](ml-service/dataset-
 | `/api/attendance` | Admin/faculty | Attendance CRUD |
 | `/api/marks` | Admin/faculty | Marks CRUD |
 | `GET /api/analytics/summary` | Admin/faculty | Averages and explained risk queue |
-| `/api/predictions` | Admin/faculty; model training is admin-only | Model status, training, and estimates |
+| `GET /api/predictions/models` | Admin/faculty | Trained model catalog and per-profile metrics |
+| `POST /api/predictions/train` | Admin | Train one or more separate model profiles |
+| `POST /api/predictions/estimate/{modelKey}` | Admin/faculty | Estimate an outcome from the selected profile's feature values |
+| `POST /api/predictions/{studentId}` | Admin/faculty | Estimate from recorded attendance and marks using the legacy profile |
 | `/api/auth/me/attendance`, `/api/auth/me/marks` | Student | Own academic records |
