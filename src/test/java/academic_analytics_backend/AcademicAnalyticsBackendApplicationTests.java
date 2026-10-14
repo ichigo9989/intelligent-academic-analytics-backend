@@ -11,6 +11,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import tools.jackson.databind.json.JsonMapper;
@@ -26,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = "FRONTEND_ORIGIN=https://academic-test.netlify.app")
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 class AcademicAnalyticsBackendApplicationTests {
 
     private static final String FRONTEND_ORIGIN = "https://academic-test.netlify.app";

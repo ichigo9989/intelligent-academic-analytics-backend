@@ -28,7 +28,10 @@ services:
       - key: BOOTSTRAP_ADMIN_PASSWORD
         sync: false
       - key: ML_API_KEY
-        sync: false
+        fromService:
+          type: web
+          name: academic-analytics-ml
+          envVarKey: ML_API_KEY
       - key: ML_SERVICE_URL
         fromService:
           type: web
