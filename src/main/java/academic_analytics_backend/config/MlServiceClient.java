@@ -8,18 +8,21 @@ import org.springframework.http.MediaType;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-
 import java.io.IOException;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class MlServiceClient {
+    private static final Pattern ERROR_MESSAGE = Pattern.compile("\\\"(?:detail|message)\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\"\\\\])*)\\\"");
     private final RestClient client;
 
     public MlServiceClient(@Value("${app.ml.base-url:}") String baseUrl,
@@ -51,9 +54,23 @@ public class MlServiceClient {
             return result == null ? Map.of("modelTrained", false) : result;
         } catch (IOException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not read the uploaded CSV.");
+        } catch (HttpClientErrorException ex) {
+            if (ex.getStatusCode().value() == 400 || ex.getStatusCode().value() == 413) {
+                throw new ResponseStatusException(ex.getStatusCode(), trainingErrorMessage(ex));
+            }
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "The ML service rejected the training request. Check its API key and deployment logs.");
         } catch (RestClientException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ML training request failed. Check the CSV requirements and service logs.");
         }
+    }
+
+    private String trainingErrorMessage(HttpClientErrorException ex) {
+        Matcher matcher = ERROR_MESSAGE.matcher(ex.getResponseBodyAsString());
+        if (matcher.find()) {
+            return matcher.group(1).replace("\\\"", "\"").replace("\\n", " ").replace("\\r", " ");
+        }
+        return "The ML service rejected the CSV. Check the required columns and row values.";
     }
 
     public Map<String, Object> predict(double attendancePercent, double averageMarksPercent, String modelArtifact) {

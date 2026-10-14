@@ -29,6 +29,11 @@ services:
         sync: false
       - key: ML_API_KEY
         sync: false
+      - key: ML_SERVICE_URL
+        fromService:
+          type: web
+          name: academic-analytics-ml
+          envVarKey: RENDER_EXTERNAL_URL
   - type: web
     name: academic-analytics-ml
     runtime: docker
