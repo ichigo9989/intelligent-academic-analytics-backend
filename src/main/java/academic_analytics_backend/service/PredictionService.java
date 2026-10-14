@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Base64;
+import java.time.Instant;
 
 @Service
 public class PredictionService {
@@ -42,15 +43,17 @@ public class PredictionService {
     @Transactional(readOnly = true)
     public ModelStatusResponse status() {
         var model = modelRepository.findMetadataById(TrainedModelArtifact.ACTIVE_MODEL_ID).orElse(null);
-        if (model == null) return new ModelStatusResponse(ml.isConfigured(), false, null, null);
+        if (model == null) return new ModelStatusResponse(ml.isConfigured(), false, null, null, null, null);
         Map<String, Object> metrics = new HashMap<>();
         metrics.put("mae", model.getMae());
         metrics.put("rmse", model.getRmse());
         metrics.put("r2", model.getR2());
+        if (model.getCvMae() != null) metrics.put("cvMae", model.getCvMae());
         metrics.put("datasetRows", model.getDatasetRows());
         metrics.put("trainRows", model.getTrainRows());
         metrics.put("testRows", model.getTestRows());
-        return new ModelStatusResponse(ml.isConfigured(), true, metrics, model.getTrainedAt());
+        return new ModelStatusResponse(ml.isConfigured(), true, model.getAlgorithm(),
+                model.getModelVersion() == null ? "1.0.0" : model.getModelVersion(), metrics, model.getTrainedAt());
     }
 
     public Map<String, Object> train(org.springframework.web.multipart.MultipartFile file) {
@@ -73,6 +76,8 @@ public class PredictionService {
         model.setId(TrainedModelArtifact.ACTIVE_MODEL_ID);
         model.setModelBytes(artifactBytes);
         model.setAlgorithm(String.valueOf(result.getOrDefault("algorithm", "RandomForestRegressor")));
+        model.setModelVersion(String.valueOf(result.getOrDefault("modelVersion", "1.0.0")));
+        if (metrics.get("cvMae") instanceof Number cvMae) model.setCvMae(cvMae.doubleValue());
         model.setMae(number(metrics, "mae"));
         model.setRmse(number(metrics, "rmse"));
         model.setR2(number(metrics, "r2"));
@@ -118,6 +123,7 @@ public class PredictionService {
                 ? (Map<String, Object>) raw : Map.of();
         return new StudentPredictionResponse(student.getId(), student.getFullName(), attendancePercent,
                 marksPercent, predicted.doubleValue(), String.valueOf(result.getOrDefault("target", "final_score")),
+                storedModel.getAlgorithm(), storedModel.getModelVersion() == null ? "1.0.0" : storedModel.getModelVersion(), Instant.now().toString(),
                 metrics, String.valueOf(result.getOrDefault("trainedAt", "")),
                 List.of("attendance_percent", "average_marks_percent"));
     }

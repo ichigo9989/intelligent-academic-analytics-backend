@@ -21,6 +21,10 @@ public class TrainedModelArtifact {
 
     @Column(nullable = false, length = 40)
     private String algorithm;
+    @Column(name = "model_version", length = 40)
+    private String modelVersion;
+    @Column(name = "cv_mae")
+    private Double cvMae;
     @Column(nullable = false)
     private Double mae;
     @Column(nullable = false)
@@ -43,6 +47,10 @@ public class TrainedModelArtifact {
     public void setModelBytes(byte[] modelBytes) { this.modelBytes = modelBytes; }
     public String getAlgorithm() { return algorithm; }
     public void setAlgorithm(String algorithm) { this.algorithm = algorithm; }
+    public String getModelVersion() { return modelVersion; }
+    public void setModelVersion(String modelVersion) { this.modelVersion = modelVersion; }
+    public Double getCvMae() { return cvMae; }
+    public void setCvMae(Double cvMae) { this.cvMae = cvMae; }
     public Double getMae() { return mae; }
     public void setMae(Double mae) { this.mae = mae; }
     public Double getRmse() { return rmse; }

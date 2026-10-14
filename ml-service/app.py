@@ -12,9 +12,12 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import GroupShuffleSplit, train_test_split
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit, KFold, cross_val_score, train_test_split
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 FEATURES = ["attendance_percent", "average_marks_percent"]
 TARGET = "final_score"
@@ -22,7 +25,8 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_MODEL_BYTES = 25 * 1024 * 1024
 MODEL_PATH = Path(os.getenv("MODEL_PATH", "artifacts/eduinsight-model.joblib"))
 API_KEY = os.getenv("ML_API_KEY", "")
-app = FastAPI(title="EduInsight ML Service", version="1.0.0")
+MODEL_VERSION = "1.1.0"
+app = FastAPI(title="EduInsight ML Service", version=MODEL_VERSION)
 
 
 class StudentFeatures(BaseModel):
@@ -55,6 +59,8 @@ def health():
     return {
         "status": "ok",
         "modelTrained": artifact is not None,
+        "algorithm": artifact.get("algorithm") if artifact else None,
+        "modelVersion": artifact.get("model_version") if artifact else None,
         "modelMetrics": artifact.get("metrics") if artifact else None,
         "trainedAt": artifact.get("trained_at") if artifact else None,
     }
@@ -112,25 +118,50 @@ async def train(file: Annotated[UploadFile, File()], x_api_key: Annotated[str, H
             raise HTTPException(status_code=400, detail="The grouped split must produce at least 15 training rows and 8 holdout rows; check student_group distribution.")
         X_train, X_test = X.iloc[train_indices], X.iloc[test_indices]
         y_train, y_test = y.iloc[train_indices], y.iloc[test_indices]
+        train_groups = groups.iloc[train_indices]
+        cv = GroupKFold(n_splits=min(5, int(train_groups.nunique())))
     else:
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.25, random_state=42
         )
-    model = RandomForestRegressor(
-        n_estimators=200, min_samples_leaf=5, max_depth=10, random_state=42, n_jobs=-1
-    )
+        train_groups = None
+        cv = KFold(n_splits=5, shuffle=True, random_state=42)
+
+    candidates = {
+        "RidgeRegressor": make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
+        "RandomForestRegressor": RandomForestRegressor(
+            n_estimators=200, min_samples_leaf=5, max_depth=10, random_state=42, n_jobs=-1
+        ),
+        "GradientBoostingRegressor": GradientBoostingRegressor(
+            n_estimators=100, learning_rate=0.05, max_depth=2, loss="huber", random_state=42
+        ),
+    }
+    comparison_mae = {}
+    for name, candidate in candidates.items():
+        fold_scores = cross_val_score(
+            candidate, X_train, y_train, groups=train_groups, cv=cv,
+            scoring="neg_mean_absolute_error", n_jobs=1,
+        )
+        comparison_mae[name] = round(float(-fold_scores.mean()), 3)
+    algorithm = min(comparison_mae, key=comparison_mae.get)
+    model = candidates[algorithm]
     model.fit(X_train, y_train)
     predicted = np.clip(model.predict(X_test), 0, 100)
     metrics = {
         "mae": round(float(mean_absolute_error(y_test, predicted)), 3),
         "rmse": round(float(np.sqrt(mean_squared_error(y_test, predicted))), 3),
         "r2": round(float(r2_score(y_test, predicted)), 4),
+        "cvMae": comparison_mae[algorithm],
         "datasetRows": int(data_rows),
         "trainRows": int(len(X_train)),
         "testRows": int(len(X_test)),
+        "cvSplits": int(cv.get_n_splits(X_train, y_train, train_groups)),
     }
     trained_at = datetime.now(timezone.utc).isoformat()
-    artifact = {"model": model, "features": FEATURES, "metrics": metrics, "trained_at": trained_at}
+    artifact = {
+        "model": model, "features": FEATURES, "metrics": metrics, "trained_at": trained_at,
+        "algorithm": algorithm, "model_version": MODEL_VERSION,
+    }
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=MODEL_PATH.parent, delete=False) as temp:
         temp_path = Path(temp.name)
@@ -142,7 +173,8 @@ async def train(file: Annotated[UploadFile, File()], x_api_key: Annotated[str, H
         temp_path.replace(MODEL_PATH)
     finally:
         temp_path.unlink(missing_ok=True)
-    return {"modelTrained": True, "algorithm": "RandomForestRegressor", "features": FEATURES,
+    return {"modelTrained": True, "algorithm": algorithm, "modelVersion": MODEL_VERSION,
+            "features": FEATURES, "crossValidationMae": comparison_mae,
             "metrics": metrics, "trainedAt": trained_at,
             "modelArtifact": base64.b64encode(artifact_bytes).decode("ascii")}
 
@@ -167,6 +199,8 @@ def predict(request: PredictionRequest, x_api_key: Annotated[str, Header()] = ""
     return {
         "predictions": [round(float(value), 2) for value in predictions],
         "modelMetrics": artifact["metrics"],
+        "algorithm": artifact.get("algorithm", "RandomForestRegressor"),
+        "modelVersion": artifact.get("model_version", "1.0.0"),
         "trainedAt": artifact["trained_at"],
         "target": "final_score",
     }
